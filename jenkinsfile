@@ -1,0 +1,104 @@
+pipeline{
+    agent any
+    // for cli pourposes
+    // environment {
+    //     ARTIFACTORY_ACCES_TOKEN = credentials('646c5da8-c01c-4b84-a71f-f0b09780954f')
+    // }
+    stages {
+        stage ("checkout") {
+            steps {
+                deleteDir()
+                checkout([$class: 'GitSCM', branches: [[name: "*${env.GIT_BRANCH}"]], extensions: [[$class: 'CleanBeforeCheckout', deleteUntrackedNestedRepositories: true]], 
+                userRemoteConfigs: [[credentialsId: 'dbc7252a-4f04-4489-94e1-16077780be7d', url: 'git@gitlab:mieku/io-extensions.git']]])
+                }
+            }
+        
+        stage ("SetVariables"){
+            steps{
+                script
+                {   //seting it everytime bcs they are going back to java 11 every time 
+                    env.JAVA_HOME="/usr/lib/jvm/java-8-openjdk-amd64"
+                    env.PATH="${env.JAVA_HOME}/bin:${env.PATH}"
+                }
+            }
+        }
+       stage ("Build"){
+            steps{
+                script{
+                    sh 'echo BUILD STAGE'
+                    configFileProvider([configFile(fileId: 'maven-user-stg', variable: 'MAVEN_SETTINGS_XML')]) {
+                    sh 'mvn --settings $MAVEN_SETTINGS_XML compile' 
+                    } 
+                }
+            }
+        }
+        stage ("Unit Tests"){
+            steps{
+                script{
+                    sh 'echo TEST STAGE'
+                    configFileProvider([configFile(fileId: 'maven-user-stg', variable: 'MAVEN_SETTINGS_XML')]) {
+                    sh 'mvn --settings $MAVEN_SETTINGS_XML test' 
+                    } 
+                }
+            }
+        }
+        stage ("MavenPackage"){
+            steps{
+                script{
+                    sh 'echo PACKAGE STAGE'
+                    configFileProvider([configFile(fileId: 'maven-user-stg', variable: 'MAVEN_SETTINGS_XML')]) {
+                    sh 'mvn --settings $MAVEN_SETTINGS_XML package' 
+                    } 
+                    }
+                }
+        }
+        stage ("MavenVerify"){
+            steps{
+                script{
+                    sh 'echo VERIFY STAGE'
+                    configFileProvider([configFile(fileId: 'maven-user-stg', variable: 'MAVEN_SETTINGS_XML')]) {
+                    sh 'mvn --settings $MAVEN_SETTINGS_XML verify' 
+                    } 
+                    }
+                }
+        }
+        stage ("MavenInstall"){
+            steps{
+                script{
+                    sh 'echo INSTALL STAGE'
+                    configFileProvider([configFile(fileId: 'maven-user-stg', variable: 'MAVEN_SETTINGS_XML')]) {
+                    sh 'mvn --settings $MAVEN_SETTINGS_XML install' 
+                    } 
+                    }
+            }
+        }
+        stage ("MavenDeploy"){
+            steps{
+                script
+                {
+                    sh 'echo DEPLOY STAGE'
+                    // cli method
+                    // sh "jf rt upload --url http://3.124.238.87:8082/artifactory/ --access-token ${ARTIFACTORY_ACCES_TOKEN} /var/jenkins_home/workspace/maven/imageio/imageio-tiff/target/terrygilliam-imageio-tiff-3.5-SNAPSHOT-sources.jar thumbnail-libs-release-local/"
+                    // sh "jf rt upload --url http://3.124.238.87:8082/artifactory/ --access-token ${ARTIFACTORY_ACCES_TOKEN} /var/jenkins_home/workspace/maven/imageio/imageio-tiff/target/terrygilliam-imageio-tiff-3.5-SNAPSHOT-sources.jar thumbnail-libs-snapshot-local/"
+                    configFileProvider([configFile(fileId: 'maven-user-stg', variable: 'MAVEN_SETTINGS_XML')]) {
+                    sh 'mvn --settings $MAVEN_SETTINGS_XML deploy' 
+                    } 
+                }
+            }
+        }
+
+        stage ("Release")
+        {
+            when { expression {env.GIT_BRANCH == 'origin/release/1.0'} }
+            steps{
+                sh 'echo RELEASE STAGE'
+                sh "versionNumber=\$(echo 3.5.\$(git rev-list origin/release/1.0 --count))"
+                configFileProvider([configFile(fileId: 'maven-user-stg', variable: 'MAVEN_SETTINGS_XML')]) {
+                sh 'mvn --settings $MAVEN_SETTINGS_XML version:set -DnewVersion="\$versionNumber"'
+                }
+                sh "git clean -n -d"
+                sh "git clean --force -n -d"
+            }
+        }
+    }
+}
